@@ -114,7 +114,7 @@ static uint32_t try_cmd(vector<string> &cmd,  uint8_t *writeBuf,
     size_t len = (size_t)(strlen(reply));
     memcpy(writeBuf, &reply, len);
     write_size = len;
-    return 100;
+    return RES_OK;
   } else if (cmd.size() == 2 && cmd[0] == "get") {
     if (database.find(cmd[1]) == database.end())
       return RES_NF;

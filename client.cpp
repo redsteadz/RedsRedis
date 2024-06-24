@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <iostream>
 #include <netinet/ip.h>
+#include <sstream>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,11 +169,11 @@ static int32_t read_res(int fd) {
   // for (int i = 8; i < 8 + len; i++) {
   //   cout << rbuf[i];
   // }
-  printf("server says: %s\n", &rbuf[8]);
+  printf("server says[%d]: %s\n", res, &rbuf[8]);
   return 0;
 }
 
-static int32_t sendReq(int fd, int32_t nstr, const char **cmd) {
+static int32_t sendReq(int fd, int32_t nstr, char **cmd) {
   // uint32_t messageLen = (uint32_t)strlen(text);
   // char writeBuff[4 + messageLen];
   // memcpy(writeBuff, &messageLen, 4);
@@ -214,6 +215,46 @@ static int32_t recvRes(int fd) {
   return 0;
 }
 
+uint32_t query(int fd) {
+  vector<string> cmd;
+  string line;
+  getline(cin, line);
+  // cout << "THIS IS A LINE : " << line << endl;
+  istringstream l(line);
+  string word;
+  int size = 0;
+  while (l >> word) {
+    cmd.push_back(word);
+    // cout << word << endl;
+    size += word.length();
+  }
+  if (cmd.size() > 0) {
+    char *cmd_chr[cmd.size()];
+    int loc = 0;
+    for (string words : cmd) {
+      cmd_chr[loc] = new char[words.size() + 1];
+      strcpy(cmd_chr[loc++], words.c_str());
+    }
+    // query(fd, cmd_chr);
+    for (int i = 0; i < cmd.size(); i++) {
+      // cout << cmd_chr[i] << " ";
+    }
+    // cout << endl;
+    int32_t err = sendReq(fd, cmd.size(), cmd_chr);
+    if (err) {
+      cout << "Req error" << endl;
+      return err;
+    }
+    err = read_res(fd);
+    if (err) {
+      cout << "Recv error" << endl;
+      return err;
+    }
+  }
+
+  return 1;
+}
+
 int main(int argc, char *argv[]) {
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -231,38 +272,8 @@ int main(int argc, char *argv[]) {
     close(fd);
     return 1;
   }
-  const char *queries[] = {"ALOO", "A", "B"};
-  // cout << sizeof(queries) << endl;
-  // for (int i = 0; i < 4; i++) {
-  int32_t err = sendReq(fd, 3, queries);
-  if (err) {
-    cout << "Req error" << endl;
-    return err;
+  while (query(fd)) {
   }
-    const char *queries2[] = {"get", "A"};
-  // cout << sizeof(queries) << endl;
-  // for (int i = 0; i < 4; i++) {
-  err = sendReq(fd, 2, queries2);
-  if (err) {
-    cout << "Req error" << endl;
-    return err;
-  }
-
-  // }
-  // cout << "Request Sent" << endl;
-  // for (int i = 0; i < 4; i++) {
-  err = read_res(fd);
-  if (err) {
-    cout << "Recv error" << endl;
-    return err;
-  }
-  err = read_res(fd);
-  if (err) {
-    cout << "Recv error" << endl;
-    return err;
-  }
-  // }
-
   shutdown(fd, SHUT_RDWR);
   close(fd);
   return 0;
