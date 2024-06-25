@@ -1,4 +1,3 @@
-#include "functions.hpp"
 #include "structures.hpp"
 #include <arpa/inet.h>
 #include <cassert>

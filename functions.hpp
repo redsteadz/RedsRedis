@@ -1,4 +1,5 @@
 
+#include "hash.h"
 #include "structures.hpp"
 #include "unordered_map"
 #include <arpa/inet.h>
@@ -20,6 +21,10 @@
 using namespace std;
 
 #pragma once
+
+static struct {
+  HMap db;
+} g_data;
 
 static void fd_set_nb(int fd) {
   errno = 0;
@@ -104,31 +109,80 @@ static void HandleRes(Connection *con) {
   }
 }
 
+static uint64_t str_hash(const uint8_t *data, size_t len) {
+  uint32_t h = 0x811C9DC5;
+  for (size_t i = 0; i < len; i++) {
+    h = (h + data[i]) * 0x01000193;
+  }
+  return h;
+}
 static unordered_map<string, string> database;
-static uint32_t try_cmd(vector<string> &cmd,  uint8_t *writeBuf,
+
+static bool entry_cmp(HNode *lhs, HNode *rhs) {
+  struct Entry *le = container_of(lhs, struct Entry, node);
+  struct Entry *re = container_of(rhs, struct Entry, node);
+  return le->key == re->key;
+}
+
+static uint32_t do_get(vector<string> &cmd, uint8_t *writeBuf,
+                       size_t &write_size) {
+  Entry key;
+  key.key.swap(cmd[1]);
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
+
+  if (!node) {
+    return RES_NF;
+  }
+
+  const string &val = (container_of(node, Entry, node))->val;
+  assert(val.size() <= MAX_BUF);
+  memcpy(writeBuf, val.data(), val.size());
+  write_size = (uint32_t)val.size();
+  return RES_OK;
+}
+
+static uint32_t do_del(vector<string> &cmd, uint8_t *writeBuf,
+                       size_t &write_size) {
+  (void)writeBuf;
+  (void)write_size;
+  Entry key;
+  key.key.swap(cmd[1]);
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+
+  HNode *node = hm_pop(&g_data.db, &key.node, &entry_cmp);
+  if (node) {
+    delete container_of(node, Entry, node);
+  }
+  return RES_OK;
+}
+
+static uint32_t do_set(vector<string> &cmd, uint8_t *writeBuf,
+                       size_t &write_size) {
+  Entry key;
+  key.key.swap(cmd[1]);
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
+
+  if (node) {
+    (container_of(node, Entry, node))->val.swap(cmd[2]);
+  } else {
+    Entry *e = new Entry(key);
+    e->val.swap(cmd[2]);
+    hm_insert(&g_data.db, &e->node);
+  }
+
+  return RES_OK;
+}
+
+static uint32_t try_cmd(vector<string> &cmd, uint8_t *writeBuf,
                         size_t &write_size) {
   if (cmd.size() == 3 && cmd[0] == "set") {
-    cout << "Setting " << endl;
-    database[cmd[1]] = cmd[2];
-    char reply[] = "Written"; 
-    size_t len = (size_t)(strlen(reply));
-    memcpy(writeBuf, &reply, len);
-    write_size = len;
-    return RES_OK;
+    return do_set(cmd, writeBuf, write_size);
   } else if (cmd.size() == 2 && cmd[0] == "get") {
-    if (database.find(cmd[1]) == database.end())
-      return RES_NF;
-    string &reply = database[cmd[1]];
-    size_t len = (size_t)reply.length();
-    memcpy(writeBuf, reply.data(), len);
-    memcpy(&write_size, &len, 4);
-    return RES_OK;
-    // cout << "Got reply " << reply << endl;
-  } else if (cmd[0] == "del") {
-    if (database.find(cmd[1]) == database.end())
-      return RES_NF;
-    database.erase(cmd[1]);
-    return RES_OK;
+    return do_get(cmd, writeBuf, write_size);
+  } else if (cmd.size() == 2 && cmd[0] == "del") {
+    return do_del(cmd, writeBuf, write_size);
   } else {
     const char *reply = "Error Invalid Command";
     size_t len = (size_t)strlen(reply);
@@ -140,9 +194,9 @@ static uint32_t try_cmd(vector<string> &cmd,  uint8_t *writeBuf,
 
 static bool try_req(Connection *con) {
   // Try evaluating this request
-  cout << "Trying request" << endl;
+  // cout << "Trying request" << endl;
   // First 4 bytes is for nstr then next is for len of the first string
-  cout << con->read_size << endl;
+  // cout << con->read_size << endl;
   if (con->read_size < 4) {
     // Wait for it
     return false;
@@ -155,13 +209,13 @@ static bool try_req(Connection *con) {
   vector<string> cmd;
   for (int i = 0; i < nstr; i++) {
     // Have you read enough data ?
-    cout << cur << endl;
+    // cout << cur << endl;
     if (cur + 4 > con->read_size)
       return false;
     memcpy(&lengths[i], &con->readBuf[cur], 4);
     cur += 4;
     // Have you read enough data ?
-    cout << cur << endl;
+    // cout << cur << endl;
     if (cur > con->read_size)
       return false;
     char str[lengths[i] + 1];
@@ -171,9 +225,9 @@ static bool try_req(Connection *con) {
     cur += lengths[i];
   }
   for (string s : cmd) {
-    cout << s << " ";
+    // cout << s << " ";
   }
-  cout << endl;
+  // cout << endl;
 
   uint32_t res = try_cmd(cmd, &con->writeBuf[4 + 4], con->write_size);
   memcpy(&con->writeBuf, &res, 4);
@@ -193,13 +247,13 @@ static bool try_req(Connection *con) {
 
 static bool fill_buff(Connection *con) {
   // cout << "FILLING " << con->read_size << endl;
-  assert(con->read_size < size(con->readBuf));
+  assert(con->read_size < sizeof(con->readBuf));
   ssize_t rv = 0;
   do {
     size_t cap = sizeof(con->readBuf) - con->read_size;
     rv = read(con->fd, &con->readBuf[con->read_size], cap);
   } while (rv < 0 && errno == EINTR);
-  cout << "Read RV: " << rv << endl;
+  // cout << "Read RV: " << rv << endl;
   if (rv < 0 && errno == EAGAIN) {
     // cout << "RV < 0 && errno == EAGAIN" << endl;
     return false;

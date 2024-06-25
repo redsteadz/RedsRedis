@@ -17,12 +17,15 @@ enum {
   END = 2,
 };
 
-enum RES_CODE {
-  RES_OK = 0,
-  RES_ERR = 1,
-  RES_NF = 2
-};
+enum RES_CODE { RES_OK = 0, RES_ERR = 1, RES_NF = 2 };
 
+enum Type {
+  SER_NIL = 0,
+  SER_ERR = 1,
+  SER_STR = 2,
+  SER_INT = 3,
+  SER_ARR = 4,
+};
 
 struct Connection {
   int fd = -1;
@@ -33,4 +36,3 @@ struct Connection {
   size_t write_sent = 0;
   uint8_t writeBuf[4 + MAX_BUF];
 };
-

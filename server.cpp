@@ -88,6 +88,7 @@ int main(int argc, char *argv[]) {
       acceptConnection(fd , connections);
     }
     // cout << "Accepted all connections" << endl;
+
   }
   
   return 0;
