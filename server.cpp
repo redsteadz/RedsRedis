@@ -1,4 +1,4 @@
-#include "functions.hpp"
+#include "lib/functions.hpp"
 #include "poll.h"
 #include <arpa/inet.h>
 #include <cassert>
@@ -55,7 +55,6 @@ int main(int argc, char *argv[]) {
         continue;
       struct pollfd conn = {};
       // Make it a non blocking connection
-      cout << "Polling connection " << c->fd << endl;
       conn.fd = c->fd;
       conn.events = (c->state == REQ) ? POLLIN : POLLOUT;
       conn.events = conn.events | POLLERR;

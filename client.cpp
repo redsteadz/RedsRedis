@@ -1,4 +1,4 @@
-#include "structures.hpp"
+#include "lib/structures.hpp"
 #include <arpa/inet.h>
 #include <cassert>
 #include <codecvt>
@@ -114,9 +114,59 @@ static int32_t read_full(int fd, char *buf, size_t n) {
   return 0;
 }
 
+uint32_t out_resp(char *rbuf, int32_t size) {
+  Type resType = (Type)rbuf[0];
+  string resp;
+  uint32_t len;
+  switch (resType) {
+  case Type::SER_STR:
+  case Type::SER_ERR:
+    if (size < 1 + 4) {
+      cout << "Bad Response" << endl;
+      return -1;
+      break;
+    }
+    memcpy(&len, &rbuf[1], 4);
+    resp.append(&rbuf[5], len);
+    printf("[str] - len: %d, res: %s\n", size, resp.c_str());
+    return 4 + len + 1;
+    break;
+  case Type::SER_NIL:
+    printf("[nil] - len: %d, res: nil\n", size);
+    return 1;
+  case Type::SER_INT:
+    if (size < 1 + 8) {
+      cout << "Bad Response" << endl;
+      return -1;
+    }
+    uint64_t val;
+    memcpy(&val, &rbuf[1], 8);
+    printf("[int] - len: %d, res: %ld\n", size, val);
+    return 8 + 1;
+  case Type::SER_ARR:
+    if (size < 1 + 4) {
+      cout << "Bad Response" << endl;
+      return -1;
+    }
+    // Every element of the array is TLD (Type Value Data)
+    memcpy(&len, &rbuf[1], 4);
+    uint32_t loc = 4 + 1;
+    for (int i = 0; i < len; i++) {
+      uint32_t rv = out_resp(&rbuf[loc], size - loc);
+      if (rv < 0) {
+        return rv;
+      }
+      loc += rv;
+    }
+
+    return loc;
+  }
+  return -1;
+}
+
 static int32_t read_res(int fd) {
   // 4 bytes header
-  char rbuf[4 + 4 + MAX_BUF + 1];
+  char rbuf[4 + MAX_BUF];
   errno = 0;
   int32_t err = read_full(fd, rbuf, 4);
   if (err) {
@@ -128,14 +178,12 @@ static int32_t read_res(int fd) {
     return err;
   }
 
-  uint32_t res = 0;
-  memcpy(&res, &rbuf, 4); // assume little endian
-  // cout << "Response " << res << endl;
-  // if (res != 0) {
-  //   return -1;
-  // }
+  uint32_t size = 0;
+  memcpy(&size, &rbuf, 4); // assume little endian
+
+  // SIZE_OF_BUF _ TYPE _ LENGTH _ DATA
   errno = 0;
-  err = read_full(fd, &rbuf[4], 4);
+  err = read_full(fd, &rbuf[4], size);
   if (err) {
     if (errno == 0) {
       cout << "EOF" << endl;
@@ -144,32 +192,7 @@ static int32_t read_res(int fd) {
     }
     return err;
   }
-
-  uint32_t len = 0;
-  memcpy(&len, &rbuf[4], 4); // assume little endian
-  // cout << "Length " << len << endl;
-
-  if (len > MAX_BUF) {
-    // msg("too long");
-    cout << "too long" << endl;
-    return -1;
-  }
-
-  // reply body
-  err = read_full(fd, &rbuf[8], len);
-  if (err) {
-    // msg("read() error");
-    cout << "read () error" << endl;
-    return err;
-  }
-
-  // do something
-  rbuf[4 + 4 + len] = '\0';
-  // for (int i = 8; i < 8 + len; i++) {
-  //   cout << rbuf[i];
-  // }
-  printf("server says[%d]: %s\n", res, &rbuf[8]);
-  return 0;
+  return out_resp(&rbuf[4], size);
 }
 
 static int32_t sendReq(int fd, int32_t nstr, char **cmd) {
@@ -193,25 +216,6 @@ static int32_t sendReq(int fd, int32_t nstr, char **cmd) {
   }
   // cout << "PACKETSIZE: " << packetSize << endl;
   return writeAll(fd, packet, packetSize);
-}
-
-static int32_t recvRes(int fd) {
-  char readBuff[4 + MAX_BUF + 1];
-  errno = 0;
-  Packet readPacket;
-  errno = 0;
-  int32_t err = readIO(fd, &readPacket);
-  if (err) {
-    if (errno == 0) {
-      cout << "EOF" << endl;
-    } else {
-      cout << "read () error" << endl;
-    }
-    return err;
-  }
-  // cout << "len: " << readPacket.len << endl;
-  cout << "Server Says: " << readPacket.msg.data() << endl;
-  return 0;
 }
 
 uint32_t query(int fd) {
@@ -245,7 +249,7 @@ uint32_t query(int fd) {
       return err;
     }
     err = read_res(fd);
-    if (err) {
+    if (err < 0) {
       cout << "Recv error" << endl;
       return err;
     }

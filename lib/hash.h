@@ -27,17 +27,12 @@ struct HMap {
   size_t resizing_pos = 0;
 };
 
-struct Entry{
-  struct HNode node;
-  string key;
-  string val;
-};
-
 
 HNode *hm_find(HMap *hmap, HNode *key, bool (*eq)(HNode *, HNode *));
 void hm_insert(HMap *hmap, HNode *node);
 HNode *hm_pop(HMap *hmap, HNode *key, bool (*eq)(HNode *, HNode *));
 size_t hm_size(HMap *hmap);
+void h_scan(HTab *htab, void (*pack)(HNode *, void *container), void *container);
 void hm_destroy(HMap *hmap);
 
 #define container_of(ptr, T, member) \

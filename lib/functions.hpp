@@ -1,5 +1,6 @@
 
 #include "hash.h"
+#include "avl.h"
 #include "structures.hpp"
 #include "unordered_map"
 #include <arpa/inet.h>
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <iterator>
 #include <netinet/ip.h>
+#include "Zset.hpp"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +27,15 @@ using namespace std;
 static struct {
   HMap db;
 } g_data;
+
+struct Entry{
+  struct HNode node;
+  string key;
+  string val;
+  uint32_t type = 0;
+  ZSet *zset = NULL;
+};
+
 
 static void fd_set_nb(int fd) {
   errno = 0;
@@ -109,13 +120,6 @@ static void HandleRes(Connection *con) {
   }
 }
 
-static uint64_t str_hash(const uint8_t *data, size_t len) {
-  uint32_t h = 0x811C9DC5;
-  for (size_t i = 0; i < len; i++) {
-    h = (h + data[i]) * 0x01000193;
-  }
-  return h;
-}
 static unordered_map<string, string> database;
 
 static bool entry_cmp(HNode *lhs, HNode *rhs) {
@@ -124,46 +128,74 @@ static bool entry_cmp(HNode *lhs, HNode *rhs) {
   return le->key == re->key;
 }
 
-static uint32_t do_get(vector<string> &cmd, uint8_t *writeBuf,
-                       size_t &write_size) {
+static void out_str(string &out, string &val) {
+  out.push_back(SER_STR);
+  uint32_t len = (uint32_t)val.size();
+  out.append((char *)&len, 4);
+  out.append(val);
+}
+
+static void out_int(string &out, int64_t val) {
+  out.push_back(SER_INT);
+  out.append((char *)&val, 8);
+}
+
+static void out_err(string &out, string &val) {
+  out.push_back(SER_ERR);
+  uint32_t len = (uint32_t)val.size();
+  out.append((char *)&len, 4);
+  out.append(val);
+}
+
+static void out_arr(string &out, uint32_t &size){
+  out.push_back(SER_ARR);
+  cout << size << endl;
+  out.append((char *)&size, 4);
+}
+
+
+static uint32_t do_get(vector<string> &cmd, string &out) {
   Entry key;
   key.key.swap(cmd[1]);
   key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
   HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
 
   if (!node) {
+    string msg = "Not found";
+    out_err(out, msg);
     return RES_NF;
   }
 
-  const string &val = (container_of(node, Entry, node))->val;
+  string &val = (container_of(node, Entry, node))->val;
   assert(val.size() <= MAX_BUF);
-  memcpy(writeBuf, val.data(), val.size());
-  write_size = (uint32_t)val.size();
+  out_str(out, val);
   return RES_OK;
 }
 
-static uint32_t do_del(vector<string> &cmd, uint8_t *writeBuf,
-                       size_t &write_size) {
-  (void)writeBuf;
-  (void)write_size;
+static uint32_t do_del(vector<string> &cmd, string &out) {
+  // (void)writeBuf;
+  // (void)write_size;
   Entry key;
   key.key.swap(cmd[1]);
   key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
 
+  out.push_back(SER_INT);
   HNode *node = hm_pop(&g_data.db, &key.node, &entry_cmp);
+  uint64_t val = 0;
   if (node) {
     delete container_of(node, Entry, node);
+    val = 1;
   }
+  out.append((char *)&val, 8);
   return RES_OK;
 }
 
-static uint32_t do_set(vector<string> &cmd, uint8_t *writeBuf,
-                       size_t &write_size) {
+static uint32_t do_set(vector<string> &cmd, string &out) {
   Entry key;
   key.key.swap(cmd[1]);
   key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
   HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
-
+  out.push_back(SER_NIL);
   if (node) {
     (container_of(node, Entry, node))->val.swap(cmd[2]);
   } else {
@@ -174,20 +206,32 @@ static uint32_t do_set(vector<string> &cmd, uint8_t *writeBuf,
 
   return RES_OK;
 }
+// TYPE - SIZE - DATA
+static void pack_str(HNode *node, void *container) {
+  string &out = *(string *) container;
+  out_str(out, (container_of(node , Entry , node))->val);
+}
+static uint32_t do_keys(vector<string> &cmd, string &out) { 
+  uint32_t size = (uint32_t)hm_size(&g_data.db);
+  out_arr(out, size);
+  h_scan(&g_data.db.ht1, pack_str, &out);
+  h_scan(&g_data.db.ht2, pack_str, &out);
+  return 0;
+}
 
-static uint32_t try_cmd(vector<string> &cmd, uint8_t *writeBuf,
-                        size_t &write_size) {
-  if (cmd.size() == 3 && cmd[0] == "set") {
-    return do_set(cmd, writeBuf, write_size);
+static uint32_t try_cmd(vector<string> &cmd, string &out) {
+  if (cmd.size() > 0 && cmd[0] == "keys") {
+    cout << "KEYS" << endl;
+    return do_keys(cmd, out);
+  } else if (cmd.size() == 3 && cmd[0] == "set") {
+    return do_set(cmd, out);
   } else if (cmd.size() == 2 && cmd[0] == "get") {
-    return do_get(cmd, writeBuf, write_size);
+    return do_get(cmd, out);
   } else if (cmd.size() == 2 && cmd[0] == "del") {
-    return do_del(cmd, writeBuf, write_size);
+    return do_del(cmd, out);
   } else {
-    const char *reply = "Error Invalid Command";
-    size_t len = (size_t)strlen(reply);
-    memcpy(writeBuf, reply, len);
-    memcpy(&write_size, &len, 4);
+    string reply = "Error Invalid Command";
+    out_err(out, reply);
     return RES_ERR;
   }
 }
@@ -228,12 +272,15 @@ static bool try_req(Connection *con) {
     // cout << s << " ";
   }
   // cout << endl;
+  string out;
+  // SIZE_OF_BUF _ TYPE _ LENGTH _ DATA
+  uint32_t res = try_cmd(cmd, out);
+  assert((uint32_t)out.size() <= MAX_BUF);
+  uint32_t wlen = (uint32_t)out.size();
+  memcpy(&con->writeBuf[0], &wlen, 4);
+  memcpy(&con->writeBuf[4], out.data(), out.size());
+  con->write_size = wlen + 4;
 
-  uint32_t res = try_cmd(cmd, &con->writeBuf[4 + 4], con->write_size);
-  memcpy(&con->writeBuf, &res, 4);
-  uint32_t len = con->write_size;
-  memcpy(&con->writeBuf[4], &len, 4);
-  con->write_size += 8;
   size_t rem = con->read_size - cur;
   if (rem) {
     memmove(&con->readBuf, &con->readBuf[cur], rem);

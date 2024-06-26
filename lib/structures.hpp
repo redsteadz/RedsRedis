@@ -27,6 +27,11 @@ enum Type {
   SER_ARR = 4,
 };
 
+enum {
+  T_STR = 0,
+  T_ZSET = 1
+};
+
 struct Connection {
   int fd = -1;
   uint32_t state = 0;
@@ -36,3 +41,12 @@ struct Connection {
   size_t write_sent = 0;
   uint8_t writeBuf[4 + MAX_BUF];
 };
+
+static uint64_t str_hash(const uint8_t *data, size_t len) {
+  uint32_t h = 0x811C9DC5;
+  for (size_t i = 0; i < len; i++) {
+    h = (h + data[i]) * 0x01000193;
+  }
+  return h;
+}
+

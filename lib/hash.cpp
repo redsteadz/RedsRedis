@@ -44,6 +44,19 @@ static HNode *h_detach(HTab *htab, HNode **from) {
   return node;
 }
 
+void h_scan(HTab *htab, void (*pack)(HNode *, void *), void *container) {
+  if (htab->size == 0)
+    return;
+  uint32_t cap = htab->mask + 1;
+  for (int i = 0; i < cap; i++) {
+    HNode *node = htab->tab[i];
+    while (node) {
+      pack(node, container);
+      node = node->next;
+    }
+  }
+};
+
 const size_t k_max_load_factor = 0;
 
 static void hm_start_resizing(HMap *hmap) {
