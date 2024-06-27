@@ -3,6 +3,6 @@ project(Server)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(Server server.cpp hash.cpp)
+add_executable(Server server.cpp lib/hash.cpp lib/Zset.cpp lib/avl.cpp)
 
 target_link_libraries(Server pthread)

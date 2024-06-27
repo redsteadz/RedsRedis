@@ -91,3 +91,45 @@ bool zset_add(ZSet *zset, const char *name, size_t len, double score) {
     return true;
   }
 }
+// Lookup and detach from set
+ZNode *zset_pop(ZSet *zset, char *name, size_t len) {
+  // Find the node from the set
+  if (len <= 0)
+    return NULL;
+
+  HKey key;
+  key.node.hcode = str_hash((uint8_t *)name, len);
+  key.name = name;
+  key.len = len;
+  HNode *found = hm_pop(&zset->db, &key.node, &hcmp);
+  if (!found) {
+    return NULL;
+  }
+  ZNode *node = container_of(found, ZNode, hnode);
+  zset->tree = avl_del(&node->avlnode);
+  return node;
+}
+
+void znode_del(ZNode *znode) { free(znode); }
+
+ZNode *zset_query(ZSet *zset, double score, const char *name, size_t len) {
+  // Find a pair >= (score, name)
+  AVLNode *found = NULL;
+  AVLNode *cur = zset->tree;
+  while (cur) {
+    if (zless(cur, score, name, len)) {
+      cur = cur->right;
+    } else {
+      found = cur;
+      cur = cur->left;
+    }
+  }
+
+  return found ? container_of(found, ZNode, avlnode) : NULL;
+}
+
+ZNode *znode_offset(ZNode *node, int64_t offset) {
+    AVLNode *tnode = node ? avl_offset(&node->avlnode, offset) : NULL;
+    return tnode ? container_of(tnode, ZNode, avlnode) : NULL;
+}
+

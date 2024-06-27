@@ -1,18 +1,16 @@
+#include "avl.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-
-#define container_of(ptr, T, member) (T *)((char *)ptr - offsetof(T, member))
-
-#include "avl.h"
-
 
 static uint32_t avl_depth(AVLNode *node) {
   if (node)
     return node->depth;
   return 0;
 }
+
+static uint32_t max(uint32_t a, uint32_t b) { return a > b ? a : b; }
 
 static uint32_t avl_cnt(AVLNode *node) {
   if (node)
@@ -21,8 +19,8 @@ static uint32_t avl_cnt(AVLNode *node) {
 }
 
 static void avl_update(AVLNode *node) {
-  node->depth = std::max(node->left->depth, node->right->depth) + 1;
-  node->cnt = node->left->cnt + node->right->cnt + 1;
+  node->depth = max(avl_depth(node->left), avl_depth(node->right)) + 1;
+  node->cnt = avl_cnt(node->left) + avl_cnt(node->right) + 1;
 }
 
 static AVLNode *left_rotate(AVLNode *node) {
@@ -136,75 +134,30 @@ AVLNode *avl_del(AVLNode *node) {
   }
 }
 
-struct Data {
-  AVLNode node;
-  uint32_t val = 0;
-};
-
-struct AVLTree {
-  AVLNode *root = NULL;
-};
-
-static void add(AVLTree &c, uint32_t val) {
-  Data *data = new Data(); // allocate the data
-  avl_init(&data->node);
-  data->val = val;
-
-  AVLNode *cur = NULL;      // current node
-  AVLNode **from = &c.root; // the incoming pointer to the next node
-  while (*from) {           // tree search
-    cur = *from;
-    uint32_t node_val = (container_of(cur, Data, node))->val;
-    from = (val < node_val) ? &cur->left : &cur->right;
+AVLNode *avl_offset(AVLNode *node, int64_t offset) {
+  int64_t pos = 0; // relative to the starting node
+  while (offset != pos) {
+    if (pos < offset && pos + avl_cnt(node->right) >= offset) {
+      // the target is inside the right subtree
+      node = node->right;
+      pos += avl_cnt(node->left) + 1;
+    } else if (pos > offset && pos - avl_cnt(node->left) <= offset) {
+      // the target is inside the left subtree
+      node = node->left;
+      pos -= avl_cnt(node->right) + 1;
+    } else {
+      // go to the parent
+      AVLNode *parent = node->parent;
+      if (!parent) {
+        return NULL; // out of range
+      }
+      if (parent->right == node) {
+        pos -= avl_cnt(node->left) + 1;
+      } else {
+        pos += avl_cnt(node->right) + 1;
+      }
+      node = parent;
+    }
   }
-  *from = &data->node; // attach the new node
-  data->node.parent = cur;
-  c.root = avl_fix(&data->node);
-}
-
-
-static bool del(AVLTree &c, uint32_t val) {
-    AVLNode *cur = c.root;
-    while (cur) {
-        uint32_t node_val = (container_of(cur, Data, node))->val;
-        if (val == node_val) {
-            break;
-        }
-        cur = val < node_val ? cur->left : cur->right;
-    }
-    if (!cur) {
-        return false;
-    }
-
-    c.root = avl_del(cur);
-    delete container_of(cur, Data, node);
-    return true;
-}
-
-static void avl_verify(AVLNode *parent, AVLNode *node) {
-    if (!node) {
-        return;
-    }
-    // verify subtrees recursively
-    avl_verify(node, node->left);
-    avl_verify(node, node->right);
-    // 1. The parent pointer is correct.
-    assert(node->parent == parent);
-    // 2. The auxiliary data is correct.
-    assert(node->cnt == 1 + avl_cnt(node->left) + avl_cnt(node->right));
-    uint32_t l = avl_depth(node->left);
-    uint32_t r = avl_depth(node->right);
-    assert(node->depth == 1 + std::max(l, r));
-    // 3. The height invariant is OK.
-    assert(l == r || l + 1 == r || l == r + 1);
-    // 4. The data is ordered.
-    uint32_t val = (container_of(node, Data, node))->val;
-    if (node->left) {
-        assert(node->left->parent == node);
-        assert((container_of(node->left, Data, node))->val <= val);
-    }
-    if (node->right) {
-        assert(node->right->parent == node);
-        assert((container_of(node->right, Data, node))->val >= val);
-    }
+  return node;
 }

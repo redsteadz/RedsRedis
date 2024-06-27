@@ -1,6 +1,6 @@
 
+#include "Zset.h"
 #include "hash.h"
-#include "avl.h"
 #include "structures.hpp"
 #include "unordered_map"
 #include <arpa/inet.h>
@@ -12,7 +12,6 @@
 #include <iostream>
 #include <iterator>
 #include <netinet/ip.h>
-#include "Zset.hpp"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,14 +27,13 @@ static struct {
   HMap db;
 } g_data;
 
-struct Entry{
+struct Entry {
   struct HNode node;
   string key;
   string val;
   uint32_t type = 0;
   ZSet *zset = NULL;
 };
-
 
 static void fd_set_nb(int fd) {
   errno = 0;
@@ -125,7 +123,7 @@ static unordered_map<string, string> database;
 static bool entry_cmp(HNode *lhs, HNode *rhs) {
   struct Entry *le = container_of(lhs, struct Entry, node);
   struct Entry *re = container_of(rhs, struct Entry, node);
-  return le->key == re->key;
+  return le->key == re->key && le->type == re->type;
 }
 
 static void out_str(string &out, string &val) {
@@ -133,6 +131,12 @@ static void out_str(string &out, string &val) {
   uint32_t len = (uint32_t)val.size();
   out.append((char *)&len, 4);
   out.append(val);
+}
+
+static void out_str(string &out, char *val, size_t len) {
+  out.push_back(SER_STR);
+  out.append((char *)&len, 4);
+  out.append(val, len);
 }
 
 static void out_int(string &out, int64_t val) {
@@ -147,12 +151,11 @@ static void out_err(string &out, string &val) {
   out.append(val);
 }
 
-static void out_arr(string &out, uint32_t &size){
+static void out_arr(string &out, uint32_t &size) {
   out.push_back(SER_ARR);
   cout << size << endl;
   out.append((char *)&size, 4);
 }
-
 
 static uint32_t do_get(vector<string> &cmd, string &out) {
   Entry key;
@@ -208,10 +211,10 @@ static uint32_t do_set(vector<string> &cmd, string &out) {
 }
 // TYPE - SIZE - DATA
 static void pack_str(HNode *node, void *container) {
-  string &out = *(string *) container;
-  out_str(out, (container_of(node , Entry , node))->val);
+  string &out = *(string *)container;
+  out_str(out, (container_of(node, Entry, node))->val);
 }
-static uint32_t do_keys(vector<string> &cmd, string &out) { 
+static uint32_t do_keys(vector<string> &cmd, string &out) {
   uint32_t size = (uint32_t)hm_size(&g_data.db);
   out_arr(out, size);
   h_scan(&g_data.db.ht1, pack_str, &out);
@@ -219,9 +222,109 @@ static uint32_t do_keys(vector<string> &cmd, string &out) {
   return 0;
 }
 
+static uint32_t do_zscore(vector<string> &cmd, string &out) {
+  string zsetName = cmd[1];
+  string member = cmd[2];
+  Entry key;
+  key.key = zsetName;
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+  key.type = 1;
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
+  if (!node) {
+    string reply = "Not found";
+    out_err(out, reply);
+    return RES_NF;
+  }
+
+  ZSet *set = (container_of(node, Entry, node))->zset;
+  ZNode *znode = zset_lookup(set, member.data(), member.length());
+  int score = znode->score;
+  out_int(out, score);
+  return RES_OK;
+}
+
+static uint32_t do_zadd(vector<string> &cmd, string &out) {
+  string zsetName = cmd[1];
+  double score = atof(cmd[2].c_str());
+  Entry key;
+  key.key = zsetName;
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+  key.type = 1;
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
+  if (!node) {
+    Entry *e = new Entry(key);
+    e->zset = new ZSet();
+    zset_add(e->zset, cmd[3].data(), cmd[3].length(), score);
+    hm_insert(&g_data.db, &e->node);
+  } else {
+    ZSet *set = (container_of(node, Entry, node))->zset;
+    zset_add(set, cmd[3].data(), cmd[3].length(), score);
+  }
+  out.push_back(SER_NIL);
+  return RES_OK;
+}
+
+static void *begin_arr(string &out) {
+  out.push_back(SER_ARR);
+  uint32_t placeHolder = 0;
+  out.append((char *)&placeHolder, 4);
+  return &out;
+}
+
+static void end_arr(string &out, void *arr, uint32_t len) {
+  char len_arr[4];
+  len_arr[0] = (len >> 24) & 0xff;
+  len_arr[1] = (len >> 16) & 0xff;
+  len_arr[2] = (len >> 8) & 0xff;
+  len_arr[3] = len & 0xff;
+  for (int i = 1; i < 5; i++) {
+    out[i] = len_arr[i - 1];
+  }
+
+  out.append((char *)&arr, len);
+}
+
+static uint32_t do_zquery(vector<string> &cmd, string &out) {
+  string zsetName = cmd[1];
+  double score = atof(cmd[2].c_str());
+  string name = cmd[3];
+  uint64_t offset = stoi(cmd[4]);
+  uint32_t limit = stoi(cmd[5]);
+  Entry key;
+  key.key = zsetName;
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+  key.type = 1;
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_cmp);
+  if (!node) {
+    string reply = "Not found";
+    out_err(out, reply);
+    return RES_NF;
+  }
+  ZSet *s = (container_of(node, Entry, node))->zset;
+  ZNode *znode = zset_query(s, score, name.data(), name.length());
+  znode = znode_offset(znode, offset);
+  void *arr = begin_arr(out);
+  uint32_t n = 0;
+  while (znode && n < limit) {
+    out_str(out, znode->name, znode->len);
+    cout << znode->name << endl;
+    cout << znode->score << endl;
+    out_int(out, znode->score);
+    znode = znode_offset(znode, 1);
+    n++;
+  }
+  end_arr(out, arr, n);
+  return RES_OK;
+}
+
 static uint32_t try_cmd(vector<string> &cmd, string &out) {
-  if (cmd.size() > 0 && cmd[0] == "keys") {
-    cout << "KEYS" << endl;
+  if (cmd.size() == 6 && cmd[0] == "zquery") {
+    return do_zquery(cmd, out);
+  } else if (cmd.size() == 3 && cmd[0] == "zscore") {
+    return do_zscore(cmd, out);
+  } else if (cmd.size() == 4 && cmd[0] == "zadd") {
+    return do_zadd(cmd, out);
+  } else if (cmd.size() > 0 && cmd[0] == "keys") {
     return do_keys(cmd, out);
   } else if (cmd.size() == 3 && cmd[0] == "set") {
     return do_set(cmd, out);
@@ -229,11 +332,10 @@ static uint32_t try_cmd(vector<string> &cmd, string &out) {
     return do_get(cmd, out);
   } else if (cmd.size() == 2 && cmd[0] == "del") {
     return do_del(cmd, out);
-  } else {
-    string reply = "Error Invalid Command";
-    out_err(out, reply);
-    return RES_ERR;
   }
+  string reply = "Error Invalid Command";
+  out_err(out, reply);
+  return RES_ERR;
 }
 
 static bool try_req(Connection *con) {
@@ -249,7 +351,8 @@ static bool try_req(Connection *con) {
   memcpy(&nstr, &con->readBuf[0], 4);
 
   int cur = 4;
-  int lengths[4] = {0};
+  int lengths[nstr];
+  memset(lengths, 0, sizeof(lengths));
   vector<string> cmd;
   for (int i = 0; i < nstr; i++) {
     // Have you read enough data ?
@@ -268,10 +371,6 @@ static bool try_req(Connection *con) {
     cmd.push_back(string(str, lengths[i]));
     cur += lengths[i];
   }
-  for (string s : cmd) {
-    // cout << s << " ";
-  }
-  // cout << endl;
   string out;
   // SIZE_OF_BUF _ TYPE _ LENGTH _ DATA
   uint32_t res = try_cmd(cmd, out);

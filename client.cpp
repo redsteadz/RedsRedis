@@ -161,7 +161,7 @@ uint32_t out_resp(char *rbuf, int32_t size) {
 
     return loc;
   }
-  return -1;
+  return 0;
 }
 
 static int32_t read_res(int fd) {
@@ -243,6 +243,7 @@ uint32_t query(int fd) {
       // cout << cmd_chr[i] << " ";
     }
     // cout << endl;
+    cout << "QUERY: " << line << endl;
     int32_t err = sendReq(fd, cmd.size(), cmd_chr);
     if (err) {
       cout << "Req error" << endl;
