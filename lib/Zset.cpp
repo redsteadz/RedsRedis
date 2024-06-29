@@ -1,5 +1,6 @@
 #include "Zset.h"
 #include "avl.h"
+#include "hash.h"
 
 static ZNode *znode_new(const char *name, size_t len, double score) {
   ZNode *znode = (ZNode *)malloc(sizeof(ZNode) + len);
@@ -133,3 +134,15 @@ ZNode *znode_offset(ZNode *node, int64_t offset) {
     return tnode ? container_of(tnode, ZNode, avlnode) : NULL;
 }
 
+static void tree_dispose(AVLNode *root) {
+  if (!root)
+    return;
+  tree_dispose(root->left);
+  tree_dispose(root->right);
+  znode_del(container_of(root, ZNode, avlnode));
+}
+
+void zset_dispose(ZSet *zset) { 
+  tree_dispose(zset->tree);
+  hm_destroy(&zset->db);
+}

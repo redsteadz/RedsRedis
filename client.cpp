@@ -243,7 +243,7 @@ uint32_t query(int fd) {
       // cout << cmd_chr[i] << " ";
     }
     // cout << endl;
-    cout << "QUERY: " << line << endl;
+    // cout << "QUERY: " << line << endl;
     int32_t err = sendReq(fd, cmd.size(), cmd_chr);
     if (err) {
       cout << "Req error" << endl;

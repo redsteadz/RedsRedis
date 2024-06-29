@@ -23,17 +23,85 @@ using namespace std;
 
 #pragma once
 
-static struct {
-  HMap db;
-} g_data;
-
 struct Entry {
   struct HNode node;
   string key;
   string val;
   uint32_t type = 0;
   ZSet *zset = NULL;
+
+  size_t heap_idx;
 };
+
+static bool hnode_same(HNode *lhs, HNode *rhs) {
+  Entry *l = container_of(lhs, Entry, node);
+  Entry *r = container_of(rhs, Entry, node);
+  return l->key == r->key;
+}
+
+static void entry_set_ttl(Entry *ent, int64_t ttl_ms) {
+  if (ttl_ms < 0 && ent->heap_idx != (size_t)-1) {
+    // erase an item from the heap
+    // by replacing it with the last item in the array.
+    size_t pos = ent->heap_idx;
+    g_data.heap[pos] = g_data.heap.back();
+    g_data.heap.pop_back();
+    if (pos < g_data.heap.size()) {
+      heap_update(g_data.heap.data(), pos, g_data.heap.size());
+    }
+    ent->heap_idx = -1;
+  } else if (ttl_ms >= 0) {
+    size_t pos = ent->heap_idx;
+    if (pos == (size_t)-1) {
+      // add an new item to the heap
+      HeapItem item;
+      item.ref = &ent->heap_idx;
+      g_data.heap.push_back(item);
+      pos = g_data.heap.size() - 1;
+    }
+    g_data.heap[pos].val = get_monotonic_usec() + (uint64_t)ttl_ms * 1000;
+    heap_update(g_data.heap.data(), pos, g_data.heap.size());
+  }
+}
+
+static void entry_del(Entry *ent) {
+  switch (ent->type) {
+  case T_ZSET:
+    zset_dispose(ent->zset);
+    delete ent->zset;
+    break;
+  }
+  entry_set_ttl(ent, -1);
+  delete ent;
+}
+
+static void process_timers() {
+  uint64_t now_us = get_monotonic_usec();
+  while (!dlist_empty(&g_data.idle_list)) {
+    Connection *next =
+        container_of(g_data.idle_list.next, Connection, idle_list);
+    uint64_t next_us = next->idle_start + k_idle_timeout_ms * 1000;
+    // cout << "now: " << now_us << " next: " << next_us << endl;
+    if (next_us >= now_us + 10000) {
+      break;
+    }
+
+    printf("removing idle connection: %d\n", next->fd);
+    conn_done(next);
+  }
+  const size_t k_max_works = 2000;
+  size_t nworks = 0;
+  while (!g_data.heap.empty() && g_data.heap[0].val < now_us) {
+    Entry *ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
+    HNode *node = hm_pop(&g_data.db, &ent->node, &hnode_same);
+    assert(node == &ent->node);
+    entry_del(ent);
+    if (nworks++ >= k_max_works) {
+      // don't stall the server if too many keys are expiring at once
+      break;
+    }
+  }
+}
 
 static void fd_set_nb(int fd) {
   errno = 0;
@@ -81,6 +149,8 @@ static int32_t acceptConnection(int fd, vector<Connection *> &connections) {
   con->read_size = 0;
   con->write_size = 0;
   con->write_sent = 0;
+  con->idle_start = get_monotonic_usec();
+  dlist_insert_before(&g_data.idle_list, &con->idle_list);
   connection_make(connections, con);
   cout << "Connection made <" << con->fd << ">" << endl;
   return 0;
@@ -155,6 +225,60 @@ static void out_arr(string &out, uint32_t &size) {
   out.push_back(SER_ARR);
   cout << size << endl;
   out.append((char *)&size, 4);
+}
+
+static bool str2int(const std::string &s, int64_t &out) {
+  char *endp = NULL;
+  out = strtoll(s.c_str(), &endp, 10);
+  return endp == s.c_str() + s.size();
+}
+
+static bool entry_eq(HNode *lhs, HNode *rhs) {
+  // Make sure the entry are the same
+  struct Entry *le = container_of(lhs, struct Entry, node);
+  struct Entry *re = container_of(rhs, struct Entry, node);
+  return le->key == re->key && le->val == re->val;
+}
+
+static uint32_t do_expire(std::vector<std::string> &cmd, std::string &out) {
+  int64_t ttl_ms = 0;
+  if (!str2int(cmd[2], ttl_ms)) {
+    string msg = "expect int64";
+    out_err(out, msg);
+    return RES_ERR;
+  }
+
+  Entry key;
+  key.key.swap(cmd[1]);
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_eq);
+  if (node) {
+    Entry *ent = container_of(node, Entry, node);
+    entry_set_ttl(ent, ttl_ms);
+  }
+  out_int(out, node ? 1 : 0);
+  return RES_OK;
+}
+
+static void do_ttl(std::vector<std::string> &cmd, std::string &out) {
+  Entry key;
+  key.key.swap(cmd[1]);
+  key.node.hcode = str_hash((uint8_t *)key.key.data(), key.key.size());
+
+  HNode *node = hm_find(&g_data.db, &key.node, &entry_eq);
+  if (!node) {
+    return out_int(out, -2);
+  }
+
+  Entry *ent = container_of(node, Entry, node);
+  if (ent->heap_idx == (size_t)-1) {
+    return out_int(out, -1);
+  }
+
+  uint64_t expire_at = g_data.heap[ent->heap_idx].val;
+  uint64_t now_us = get_monotonic_usec();
+  return out_int(out, expire_at > now_us ? (expire_at - now_us) / 1000 : 0);
 }
 
 static uint32_t do_get(vector<string> &cmd, string &out) {
@@ -318,7 +442,12 @@ static uint32_t do_zquery(vector<string> &cmd, string &out) {
 }
 
 static uint32_t try_cmd(vector<string> &cmd, string &out) {
-  if (cmd.size() == 6 && cmd[0] == "zquery") {
+  if (cmd.size() == 2 && cmd[0] == "pttl") {
+    do_ttl(cmd, out);
+    return RES_OK;
+  } else if (cmd.size() == 2 && cmd[0] == "pexpire") {
+    return do_expire(cmd, out);
+  } else if (cmd.size() == 6 && cmd[0] == "zquery") {
     return do_zquery(cmd, out);
   } else if (cmd.size() == 3 && cmd[0] == "zscore") {
     return do_zscore(cmd, out);
@@ -431,6 +560,11 @@ static void HandleReq(Connection *con) {
 }
 
 static void HandleConnection(Connection *con) {
+  // Update the timer in the connection
+  con->idle_start = get_monotonic_usec();
+  dlist_detach(&con->idle_list);
+  dlist_insert_before(&g_data.idle_list, &con->idle_list);
+
   if (con->state == REQ) {
     HandleReq(con);
   } else if (con->state == RES) {
