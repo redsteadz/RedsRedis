@@ -63,7 +63,7 @@ static uint64_t str_hash(const uint8_t *data, size_t len) {
   return h;
 }
 
-const uint64_t k_idle_timeout_ms = 5 * 1000;
+const uint64_t k_idle_timeout_ms = 30 * 1000;
 
 static uint64_t get_monotonic_usec() {
   timespec tv = {0, 0};

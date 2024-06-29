@@ -30,14 +30,10 @@ struct Entry {
   uint32_t type = 0;
   ZSet *zset = NULL;
 
-  size_t heap_idx;
+  size_t heap_idx = -1;
 };
 
-static bool hnode_same(HNode *lhs, HNode *rhs) {
-  Entry *l = container_of(lhs, Entry, node);
-  Entry *r = container_of(rhs, Entry, node);
-  return l->key == r->key;
-}
+static bool hnode_same(HNode *lhs, HNode *rhs) { return lhs == rhs; }
 
 static void entry_set_ttl(Entry *ent, int64_t ttl_ms) {
   if (ttl_ms < 0 && ent->heap_idx != (size_t)-1) {
@@ -59,7 +55,9 @@ static void entry_set_ttl(Entry *ent, int64_t ttl_ms) {
       g_data.heap.push_back(item);
       pos = g_data.heap.size() - 1;
     }
+    // cout << pos << " " << g_data.heap.size() << endl;
     g_data.heap[pos].val = get_monotonic_usec() + (uint64_t)ttl_ms * 1000;
+    cout << g_data.heap[pos].val << endl;
     heap_update(g_data.heap.data(), pos, g_data.heap.size());
   }
 }
@@ -93,6 +91,7 @@ static void process_timers() {
   size_t nworks = 0;
   while (!g_data.heap.empty() && g_data.heap[0].val < now_us) {
     Entry *ent = container_of(g_data.heap[0].ref, Entry, heap_idx);
+    cout << ent->key << endl;
     HNode *node = hm_pop(&g_data.db, &ent->node, &hnode_same);
     assert(node == &ent->node);
     entry_del(ent);
@@ -237,7 +236,7 @@ static bool entry_eq(HNode *lhs, HNode *rhs) {
   // Make sure the entry are the same
   struct Entry *le = container_of(lhs, struct Entry, node);
   struct Entry *re = container_of(rhs, struct Entry, node);
-  return le->key == re->key && le->val == re->val;
+  return le->key == re->key;
 }
 
 static uint32_t do_expire(std::vector<std::string> &cmd, std::string &out) {
@@ -445,7 +444,7 @@ static uint32_t try_cmd(vector<string> &cmd, string &out) {
   if (cmd.size() == 2 && cmd[0] == "pttl") {
     do_ttl(cmd, out);
     return RES_OK;
-  } else if (cmd.size() == 2 && cmd[0] == "pexpire") {
+  } else if (cmd.size() == 3 && cmd[0] == "pexpire") {
     return do_expire(cmd, out);
   } else if (cmd.size() == 6 && cmd[0] == "zquery") {
     return do_zquery(cmd, out);
