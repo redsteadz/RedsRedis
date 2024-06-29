@@ -1,4 +1,5 @@
 #include "dlist.h"
+#include "thread.h"
 #include "hash.h"
 #include "heap.h"
 #include <arpa/inet.h>
@@ -53,6 +54,7 @@ static struct {
   vector<Connection *> connections;
   Dlist idle_list;
   vector<HeapItem> heap;
+  ThreadPool tp;
 } g_data;
 
 static uint64_t str_hash(const uint8_t *data, size_t len) {

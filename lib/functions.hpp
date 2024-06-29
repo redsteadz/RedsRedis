@@ -62,15 +62,35 @@ static void entry_set_ttl(Entry *ent, int64_t ttl_ms) {
   }
 }
 
-static void entry_del(Entry *ent) {
+static void entry_destroy(Entry *ent) {
   switch (ent->type) {
   case T_ZSET:
     zset_dispose(ent->zset);
     delete ent->zset;
     break;
   }
-  entry_set_ttl(ent, -1);
   delete ent;
+}
+
+static void entry_del_async(void *arg) { entry_destroy((Entry *)arg); }
+
+// dispose the entry after it got detached from the key space
+static void entry_del(Entry *ent) {
+  entry_set_ttl(ent, -1);
+
+  const size_t k_large_container_size = 10000;
+  bool too_big = false;
+  switch (ent->type) {
+  case T_ZSET:
+    too_big = hm_size(&ent->zset->db) > k_large_container_size;
+    break;
+  }
+
+  if (too_big) {
+    thread_pool_queue(&g_data.tp, &entry_del_async, ent);
+  } else {
+    entry_destroy(ent);
+  }
 }
 
 static void process_timers() {
