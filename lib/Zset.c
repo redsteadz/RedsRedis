@@ -1,6 +1,13 @@
 #include "Zset.h"
 #include "avl.h"
 #include "hash.h"
+#include <stdlib.h>
+#include <string.h>
+
+// Helper function to find minimum of two values
+static size_t min_size_t(size_t a, size_t b) {
+    return (a < b) ? a : b;
+}
 
 static ZNode *znode_new(const char *name, size_t len, double score) {
   ZNode *znode = (ZNode *)malloc(sizeof(ZNode) + len);
@@ -46,14 +53,14 @@ static bool zless(AVLNode *lhs, double score, const char *name, size_t len) {
   if (zl->score != score) {
     return zl->score < score;
   }
-  int rv = memcmp(zl->name, name, min(zl->len, len));
+  int rv = memcmp(zl->name, name, min_size_t(zl->len, len));
   if (rv != 0) {
     return rv < 0;
   }
   return zl->len < len;
 }
 
-static bool zless(AVLNode *lhs, AVLNode *rhs) {
+static bool zless_nodes(AVLNode *lhs, AVLNode *rhs) {
   ZNode *zr = container_of(rhs, ZNode, avlnode);
   return zless(lhs, zr->score, zr->name, zr->len);
 }
@@ -63,7 +70,7 @@ static void tree_add(ZSet *zset, ZNode *znode) {
   AVLNode **from = &zset->tree;
   while (*from) {
     cur = *from;
-    from = zless(&znode->avlnode, cur) ? &cur->left : &cur->right;
+    from = zless_nodes(&znode->avlnode, cur) ? &cur->left : &cur->right;
   }
   *from = &znode->avlnode;
   znode->avlnode.parent = cur;
@@ -92,6 +99,7 @@ bool zset_add(ZSet *zset, const char *name, size_t len, double score) {
     return true;
   }
 }
+
 // Lookup and detach from set
 ZNode *zset_pop(ZSet *zset, char *name, size_t len) {
   // Find the node from the set
@@ -145,4 +153,4 @@ static void tree_dispose(AVLNode *root) {
 void zset_dispose(ZSet *zset) { 
   tree_dispose(zset->tree);
   hm_destroy(&zset->db);
-}
+} 

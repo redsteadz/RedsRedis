@@ -1,23 +1,21 @@
-#pragma once
+#ifndef AVL_H
+#define AVL_H
 
 #include <stddef.h>
 #include <stdint.h>
 
+// AVL tree node structure
+typedef struct AVLNode {
+    struct AVLNode* left;
+    struct AVLNode* right;
+    struct AVLNode* parent;
+    int32_t balance;
+} AVLNode;
 
-struct AVLNode {
-    uint32_t depth = 0;
-    uint32_t cnt = 0;
-    AVLNode *left = NULL;
-    AVLNode *right = NULL;
-    AVLNode *parent = NULL;
-};
+// Function declarations
+void avl_init(AVLNode* node);
+AVLNode* avl_fix(AVLNode* node);
+AVLNode* avl_del(AVLNode* node);
+AVLNode* avl_offset(AVLNode* node, int64_t offset);
 
-inline void avl_init(AVLNode *node) {
-    node->depth = 1;
-    node->cnt = 1;
-    node->left = node->right = node->parent = NULL;
-}
-
-AVLNode *avl_fix(AVLNode *node);
-AVLNode *avl_del(AVLNode *node);
-AVLNode *avl_offset(AVLNode *node, int64_t offset);
+#endif // AVL_H

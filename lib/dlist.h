@@ -1,31 +1,40 @@
-#include <cstddef>
-#pragma once
+#ifndef DLIST_H
+#define DLIST_H
 
-struct Dlist {
-  Dlist *next = NULL;
-  Dlist *prev = NULL;
-};
+#include <stdbool.h>
 
-inline void dlist_init(Dlist *d) {
-  d->next = d;
-  d->prev = d;
+// Double linked list node
+typedef struct Dlist {
+    struct Dlist* next;
+    struct Dlist* prev;
+} Dlist;
+
+// Initialize a double linked list
+static inline void dlist_init(Dlist* d) {
+    d->next = d;
+    d->prev = d;
 }
 
-inline bool dlist_empty(Dlist *d) {
-  return d->next == d;
+// Check if list is empty
+static inline bool dlist_empty(Dlist* d) {
+    return d->next == d;
 }
 
-inline void dlist_detach(Dlist *t){
-  Dlist *p = t->prev;
-  Dlist *n = t->next;
-  p->next = n;
-  n->prev = p;
+// Detach a node from list
+static inline void dlist_detach(Dlist* t) {
+    Dlist* p = t->prev;
+    Dlist* n = t->next;
+    p->next = n;
+    n->prev = p;
 }
 
-inline void dlist_insert_before(Dlist *t, Dlist *n) {
-  Dlist *p = t->prev;
-  p->next = n;
-  n->prev = p;
-  n->next = t;
-  t->prev = n;
+// Insert a node before target
+static inline void dlist_insert_before(Dlist* t, Dlist* n) {
+    Dlist* p = t->prev;
+    p->next = n;
+    n->prev = p;
+    n->next = t;
+    t->prev = n;
 }
+
+#endif // DLIST_H

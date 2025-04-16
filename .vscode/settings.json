@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "iostream": "cpp",
+        "structures.hpp": "c",
+        "structures.h": "c",
+        "hash.h": "c",
+        "dlist.h": "c",
+        "thread.h": "c",
+        "cstddef": "cpp",
+        "zset.h": "c"
+    }
+}

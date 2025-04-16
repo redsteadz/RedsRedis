@@ -1,8 +1,23 @@
 cmake_minimum_required(VERSION 3.10)
-project(Server)
+project(Server C)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_C_STANDARD 11)
 
-add_executable(Server server.cpp lib/hash.cpp lib/Zset.cpp lib/avl.cpp lib/heap.cpp lib/thread.cpp)
+# Create a list of source files
+set(SOURCES
+    server.c
+    lib/hash.c
+    lib/Zset.c
+    lib/avl.c
+    lib/structures.c
+    lib/functions.c
+    lib/dlist.c
+    lib/heap.c
+    lib/thread.c
+)
 
+# Create the executable
+add_executable(Server ${SOURCES})
+
+# Link with pthread
 target_link_libraries(Server pthread)

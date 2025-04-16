@@ -20,7 +20,7 @@ static void heap_up(HeapItem *a, size_t pos) {
 
 static void heap_down(HeapItem *a, size_t pos, size_t size) {
   HeapItem t = a[pos];
-  while (true) {
+  while (1) {
     size_t l = heap_left(pos);
     size_t r = heap_right(pos);
     size_t min_pos = -1;
