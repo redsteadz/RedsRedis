@@ -1,87 +1,63 @@
 # RedsRedis
 
-## Overview
-RedsRedis is a high-performance, multi-threaded Redis-like database implemented in C++. It supports a variety of data structures and features, including offset-based retrieval and an efficient packet system for data communication.
+RedsRedis is a Linux-focused, Redis-inspired key-value server written in C++14. It is an educational implementation of non-blocking sockets, polling, binary request/response framing, timers, and custom data structures—not a drop-in Redis server or Redis protocol implementation.
 
-## Features
-- **Multi-threading**: Optimized concurrency for handling multiple client requests.
-- **Data Structures**:
-  - **Hash Tables** for key-value storage.
-  - **ZSets (Sorted Sets)** for ordered data.
-  - **AVL Trees** for balanced search operations.
-  - **Heaps** for priority-based retrieval.
-- **Offset-Based Retrieval**: Efficient querying using data offsets for high-speed lookups.
-- **Packet System**: A structured packet system for handling multiple data types and requests seamlessly.
-- **Optimized Performance**: Leveraging advanced data structures and threading for scalability and speed.
+## Implemented systems
 
-## Installation
+- A non-blocking TCP server using `poll`
+- A custom hash table for string keys
+- Sorted sets backed by a hash table and AVL tree
+- Millisecond key expiry tracked with a heap
+- A small typed response format for strings, integers, arrays, errors, and nil values
+- An interactive command-line client
 
-### Prerequisites
-Ensure you have the following installed:
-- **CMake** (for project configuration)
-- **GCC/Clang** (for compiling C++ code)
-- **Make** (or an equivalent build tool)
+The server listens on `127.0.0.1:1800`.
 
-### Build Instructions
-```sh
-# Clone the repository
-git clone https://github.com/yourusername/RedsRedis.git
+## Commands
+
+Commands are lowercase in the current parser.
+
+| Command | Purpose |
+| --- | --- |
+| `set key value` | Create or replace a string value |
+| `get key` | Read a string value |
+| `del key` | Delete a key |
+| `keys` | List stored values from the hash table |
+| `pexpire key milliseconds` | Set a millisecond expiry |
+| `pttl key` | Read the remaining expiry in milliseconds |
+| `zadd set score member` | Add or update a sorted-set member |
+| `zscore set member` | Read a member's score |
+| `zquery set score member offset limit` | Query sorted-set entries from a score/member position |
+
+## Build and run
+
+RedsRedis uses POSIX socket APIs and is intended for Linux or a compatible Unix-like environment.
+
+~~~bash
+git clone https://github.com/redsteadz/RedsRedis.git
 cd RedsRedis
 
-# Create a build directory
-mkdir build && cd build
+cmake -S . -B build
+cmake --build build
+g++ -std=c++14 client.cpp -o build/Client
+~~~
 
-# Run CMake
-cmake ..
+Start the server and client in separate terminals:
 
-# Compile the project
-make
-```
+~~~bash
+./build/Server
+./build/Client
+~~~
 
-## Usage
-Run the server:
-```sh
-./Server
-```
+Then enter commands such as:
 
-### Example Commands
-- **Set a key-value pair:**
-  ```sh
-  set key value
-  ```
-- **Retrieve a value:**
-  ```sh
-  get key
-  ```
-- **Insert into a sorted set:**
-  ```sh
-  zadd myset 10 value1
-  ```
-- **Retrieve from an offset:**
-  ```sh
-  zquery myset 5 value1 r1 r2
-  ```
+~~~text
+set language cpp
+get language
+pexpire language 5000
+pttl language
+~~~
 
-## Performance Optimizations
-- **Lock-free structures** where possible to minimize contention.
-- **Efficient memory management** using pools and custom allocators.
-- **Batch processing support** for handling multiple requests efficiently.
+## Scope
 
-## Roadmap
-- Implement replication support.
-- Add persistence for durable storage.
-- Improve clustering capabilities.
-
-## Contributions
-Contributions are welcome! Please follow the standard GitHub workflow:
-1. Fork the repository.
-2. Create a new branch (`feature-xyz`).
-3. Commit and push your changes.
-4. Submit a Pull Request.
-
-## License
-This project is licensed under the MIT License. See `LICENSE` for details.
-
-## Contact
-For questions, feel free to open an issue or reach out to `hamees.ehsan@gmail.com`.
-
+The project currently stores data in memory and uses its own wire format. Persistence, replication, clustering, and Redis-client compatibility are outside the current implementation.
